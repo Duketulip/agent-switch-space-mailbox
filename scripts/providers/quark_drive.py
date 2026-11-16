@@ -16,6 +16,7 @@ from __future__ import annotations
 import json
 import os
 import random
+import re
 import shutil
 import subprocess
 import tempfile
@@ -51,7 +52,7 @@ class QuarkDriveProvider:
         self.session_input = cfg.get("session_input") or "agent switch space mailbox"
         self.session_id = cfg.get("session_id") or _new_session_id()
         self.timeout = int(cfg.get("timeout") or 180)
-        self.verify_retries = int(cfg.get("verify_retries") or 4)
+        self.verify_retries = int(cfg.get("verify_retries") or 6)
         self.verify_delay = float(cfg.get("verify_delay") or 2.0)
         self.tmp = os.path.realpath(cfg.get("tmp") or os.path.join(tempfile.gettempdir(), "agsstmp"))
         os.makedirs(self.tmp, exist_ok=True)
@@ -244,37 +245,28 @@ class QuarkDriveProvider:
             raise ProviderError(f"移动失败：{relpath}/{name} → {to_relpath}")
 
         # 实测：move 之后既不能只信 fid（fid 会变），也不能只信一次列表（可见性有数秒延迟）。
-        # 判定成功的条件（任一成立即可，且要求 move 命令本身已返回成功）：
-        #   a) 目标目录里出现同名/同名被改名(带后缀)的条目；
-        #   b) 原目录里已经不再有这条消息。
-        stem = os.path.splitext(name)[0]
+        # 判定成功的条件**只有正向证据**：目标目录里出现同名条目（含撞名改名 `stem(1).ext`）
+        # 或 fid 命中。要求 move 命令本身返回成功 + 目标目录确认。
+        #
+        # 刻意**不**接受"原目录已消失"作为成功依据（外部评审指出）：源文件消失可能是被
+        # 服务端清理、被第三方移走，甚至是列表抖动，用它判定成功会产生假阳性。宁可失败
+        # 上报，也不静默当成已完成。
+        stem, ext = os.path.splitext(name)
+        pat = re.compile(rf"^{re.escape(stem)}(\(\d+\))?{re.escape(ext)}$")
         want = _bare_fid(entry["id"])
 
-        def present_in(target_rel: str) -> bool:
-            for e in self.list_dir(target_rel):
+        for attempt in range(self.verify_retries):
+            for e in self.list_dir(to_relpath):
                 if e["is_dir"]:
                     continue
-                if e["name"] == name or e["name"].startswith(stem):
-                    return True
-                if _bare_fid(e["id"] or "") == want:
-                    return True
-            return False
-
-        def gone_from(src_rel: str) -> bool:
-            return not any((not e["is_dir"]) and (e["name"] == name or
-                                                 e["name"].startswith(stem))
-                           for e in self.list_dir(src_rel))
-
-        for attempt in range(self.verify_retries):
-            if present_in(to_relpath):
-                return
-            if attempt >= 1 and gone_from(relpath):
-                return
+                if pat.match(e["name"] or "") or _bare_fid(e["id"] or "") == want:
+                    return
             if attempt < self.verify_retries - 1:
                 time.sleep(self.verify_delay)
         raise ProviderError(
             f"移动校验失败：{relpath}/{name} → {to_relpath}"
-            f"（目标目录未命中，且原目录仍存在该文件）")
+            f"（{self.verify_retries} 次重试后目标目录仍未出现该文件；"
+            f"源目录状态不作为成功依据）")
 
     def remove(self, relpath: str, name: str) -> None:
         raise Unsupported("夸克网盘 CLI 没有删除能力；邮箱只允许移动归档，不允许删除")

@@ -32,12 +32,12 @@
 | `list_dir` | `browse --parent-fid <fid> --all` | 读 artifact（JSONL）拿全量 |
 | `read_text` | `download --fid <fid> --output-dir <tmp> --overwrite` | 落到临时目录再读 |
 | `write_text` | `upload <local> --parent-fid <fid>` | 不做预检，冲突交给 core 回读发现 |
-| `move` | `move <fid> --target-fid <fid>` | 带 4×2s 重试校验 |
+| `move` | `move <fid> --target-fid <fid>` | 只认目标目录正向证据，6×2s 重试 |
 | `remove` | — | **不支持**，抛 `Unsupported` |
 
 - 实测得到的三条硬事实（影响实现，详见 `技术可行性调研报告.md`）：
   1. 同名上传**不覆盖**，自动改名 `name(1).json`；
-  2. 移动撞名同样改名；移动后 fid 可能变、目录可见性有几秒延迟；
+  2. 移动撞名同样改名；移动后 fid 可能变、目录可见性有几秒延迟 → 校验只按"目标目录出现同名/fid 命中"判定，**不**用"源目录消失"当成功依据（外部评审指出该兜底会造成假阳性，已移除）；
   3. 无删除命令 → 邮箱只增不减。
 
 ### `dir_local`（离线自测 / 本地兜底）
