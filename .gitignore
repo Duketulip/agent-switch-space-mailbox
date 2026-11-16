@@ -1,0 +1,22 @@
+# 本 Skill 的运行时凭据与第三方 CLI 一律不入库
+_vendor/
+**/config.json
+**/doubao/
+**/.quarkclouddrive/
+**/.log/
+
+# 阶段一探测的临时产物
+verify/_tmp/
+verify/_tmp2/
+verify/evidence-*.jsonl
+verify/.quarkclouddrive/
+.quarkclouddrive/
+
+# 内部材料（未发布）
+需求.md
+技术可行性调研报告.md
+
+# 本地台账与缓存
+*.pyc
+__pycache__/
+.agent_switch_space/
